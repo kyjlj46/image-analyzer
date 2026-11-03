@@ -55,7 +55,11 @@ def main() -> None:
     print(f"[실행] {url}  (종료: Ctrl+C)")
     if not os.environ.get("NO_BROWSER"):
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
-    uvicorn.run("app:app", host=HOST, port=PORT)
+    # 코드(app.py, agent/*.py)가 바뀌면 서버가 자동으로 다시 시작된다. 끄려면 RELOAD=0
+    reload = os.environ.get("RELOAD", "1") != "0"
+    uvicorn.run("app:app", host=HOST, port=PORT, reload=reload,
+                reload_dirs=[str(ROOT / "agent"), str(ROOT)] if reload else None,
+                reload_excludes=[".venv/*", "sessions/*", "outputs/*"] if reload else None)
 
 
 if __name__ == "__main__":
