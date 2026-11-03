@@ -1,7 +1,9 @@
 """LLM 호출 계층 - 로그인된 Claude Code CLI(`claude -p`)를 감싼다.
 
 API 키 없이 이 PC의 Claude Code 계정으로 동작한다. 다른 LLM(예: Anthropic API)으로 바꾸려면
-이 파일의 stream_text()만 교체하면 그래프/노드는 그대로 쓸 수 있다.
+이 파일의 stream_text() / complete()만 교체하면 그래프와 노드는 그대로 쓸 수 있다.
+
+노드별로 쓸 수 있는 도구를 tools 인자로 제한한다. 예) "Read", "Read,WebSearch"
 """
 
 import json
@@ -11,7 +13,10 @@ import subprocess
 from pathlib import Path
 from typing import Iterator
 
-TIMEOUT_SEC = 600
+TIMEOUT_SEC = 900
+
+# stream_text()가 내보내는 특수 신호: "지금까지 흘려보낸 텍스트는 도구 사용 전 안내 문구였으니 지워라"
+RESET = object()
 
 
 class LLMError(RuntimeError):
@@ -25,11 +30,10 @@ def _find_claude() -> str:
     return exe
 
 
-def stream_text(prompt: str, system: str, workdir: Path, tools: str = "Read") -> Iterator[str]:
-    """Claude Code를 한 번 실행하고, 도구(이미지 읽기) 사용 이후의 답변 텍스트를 스트리밍한다."""
+def _events(prompt: str, system: str, workdir: Path, tools: str) -> Iterator[dict]:
     cmd = [
         _find_claude(), "-p", prompt,
-        "--tools", tools,            # 모델에게 보이는 도구 자체를 제한 (파일 쓰기 시도 방지)
+        "--tools", tools,            # 모델에게 보이는 도구 자체를 제한 (파일 쓰기 등 차단)
         "--allowedTools", tools,
         "--no-session-persistence",  # 분석 호출이 Claude Code 세션 기록에 쌓이지 않게
         "--append-system-prompt", system,
@@ -39,42 +43,58 @@ def stream_text(prompt: str, system: str, workdir: Path, tools: str = "Read") ->
         cmd, cwd=workdir, stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8", errors="replace",
     )
-    tool_used = False  # 도구 사용 전의 "읽어보겠습니다" 같은 안내 문구는 버린다
-    got_text = False
+    got_result = False
     try:
         for line in proc.stdout:
             try:
                 ev = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            kind = ev.get("type")
-            if kind == "user":  # 도구 결과가 돌아옴
-                tool_used = True
-            elif kind == "stream_event" and tool_used:
-                delta = ev["event"].get("delta", {})
-                if delta.get("type") == "text_delta":
-                    got_text = True
-                    yield delta["text"]
-            elif kind == "result":
+            if ev.get("type") == "result":
+                got_result = True
                 if ev.get("is_error"):
                     raise LLMError(str(ev.get("result") or ev.get("subtype")))
-                if not got_text and ev.get("result"):
-                    yield ev["result"]
+            yield ev
         proc.wait(timeout=TIMEOUT_SEC)
-        if proc.returncode and not got_text:
+        if not got_result:
             raise LLMError(f"Claude Code 실행 실패: {proc.stderr.read().strip() or proc.returncode}")
     finally:
         if proc.poll() is None:
             proc.kill()
 
 
-def complete(prompt: str, system: str, workdir: Path) -> str:
-    return "".join(stream_text(prompt, system, workdir))
+def stream_text(prompt: str, system: str, workdir: Path, tools: str = "Read") -> Iterator:
+    """답변 텍스트를 토큰 단위로 흘려보낸다.
+
+    텍스트가 나온 뒤 도구 호출이 시작되면 RESET을 내보낸다 (그 텍스트는 "확인해 보겠습니다" 같은 안내였음).
+    """
+    emitted = False
+    for ev in _events(prompt, system, workdir, tools):
+        if ev.get("type") != "stream_event":
+            if ev.get("type") == "result" and not emitted and ev.get("result"):
+                yield ev["result"]
+            continue
+        inner = ev["event"]
+        if inner.get("type") == "content_block_start" and inner["content_block"].get("type") == "tool_use":
+            if emitted:
+                yield RESET
+                emitted = False
+        elif inner.get("type") == "content_block_delta" and inner["delta"].get("type") == "text_delta":
+            emitted = True
+            yield inner["delta"]["text"]
 
 
-def complete_json(prompt: str, system: str, workdir: Path) -> dict:
+def complete(prompt: str, system: str, workdir: Path, tools: str = "Read") -> str:
+    """최종 답변 텍스트만 돌려준다 (중간 안내 문구 제외)."""
+    for ev in _events(prompt, system, workdir, tools):
+        if ev.get("type") == "result":
+            return ev.get("result") or ""
+    return ""
+
+
+def complete_json(prompt: str, system: str, workdir: Path, tools: str = "Read") -> dict:
     """JSON 한 개로 답하게 하고 파싱한다. 실패하면 빈 dict."""
-    text = complete(prompt + "\n\n반드시 JSON 객체 하나만 출력하세요. 다른 말은 쓰지 마세요.", system, workdir)
+    text = complete(prompt + "\n\n반드시 JSON 객체 하나만 출력하세요. 다른 말은 쓰지 마세요.", system, workdir, tools)
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
         return {}
