@@ -82,6 +82,8 @@ def classify(state: ImageState) -> dict:
     reason = result.get("reason", "")
     emit(i, type="status", node="classify",
          message=f"유형: {prompts.IMAGE_TYPES[image_type]}" + (f" — {reason}" if reason else ""))
+    emit(i, type="classified", image_type=image_type, label=prompts.IMAGE_TYPES[image_type],
+         short=prompts.TYPE_SHORT[image_type], reason=reason, auto=True)
     return {"image_type": image_type, "classify_reason": reason}
 
 
@@ -96,6 +98,9 @@ def analyze(state: ImageState) -> dict:
     if revision > 0:
         prompt += prompts.REVISION_PROMPT.format(draft=state["draft"], feedback=state["feedback"])
         emit(i, type="reset", part="draft")
+    elif state.get("mode", "auto") != "auto":  # 사용자가 유형을 직접 지정한 경우
+        emit(i, type="classified", image_type=image_type, label=prompts.IMAGE_TYPES[image_type],
+             short=prompts.TYPE_SHORT[image_type], reason="", auto=False)
 
     emit(i, type="status", node="analyze",
          message="분석 작성 중…" if revision == 0 else f"피드백 반영해 다시 작성 중… ({revision}차 수정)")
@@ -191,7 +196,7 @@ image_graph = build_image_graph()
 
 # ═══ 2) 여러 장 병렬 처리 + 종합 리포트 ══════════════════════════════════
 
-RESULT_KEYS = ("index", "name", "image_path", "image_type", "draft", "revision", "approved", "verification", "research", "error")
+RESULT_KEYS = ("index", "name", "image_path", "mode", "image_type", "classify_reason", "draft", "revision", "approved", "verification", "research", "error")
 
 
 class BatchState(TypedDict, total=False):
@@ -215,7 +220,8 @@ def process_image(state: ImageState) -> dict:
         emit(i, type="error", message=str(e))
         final = {**state, "error": str(e)}
     result = {k: final.get(k) for k in RESULT_KEYS}
-    emit(i, type="image_done", image_type=result["image_type"], revisions=result["revision"] or 0,
+    emit(i, type="image_done", image_type=result["image_type"],
+         short=prompts.TYPE_SHORT.get(result["image_type"] or "", ""), revisions=result["revision"] or 0,
          approved=result["approved"], error=result["error"])
     return {"results": [result]}
 

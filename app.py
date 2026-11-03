@@ -69,9 +69,12 @@ def render_txt(s: dict) -> str:
     for img in s["images"]:
         head = f"{line}\n[{img['index']}/{len(s['images'])}] {img['name']}"
         if img.get("image_type"):
-            head += f"\n유형: {IMAGE_TYPES.get(img['image_type'], img['image_type'])}"
+            how = "에이전트 자동 판별" if img.get("mode", "auto") == "auto" else "사용자 지정"
+            head += f"\n유형: {IMAGE_TYPES.get(img['image_type'], img['image_type'])} ({how})"
             if img.get("revision"):
                 head += f" · 검토 후 {img['revision']}회 수정"
+            if img.get("classify_reason"):
+                head += f"\n판별 근거: {img['classify_reason']}"
         out.append(f"{head}\n{line}\n\n{img.get('draft') or ('[오류] ' + (img.get('error') or '분석 결과 없음'))}")
         if img.get("verification"):
             out.append(f"\n[웹 검증]\n{img['verification']}")
@@ -116,7 +119,8 @@ def run_analysis(s: dict, options: dict, report_enabled: bool, concurrency: int)
     by_index = {r["index"]: r for r in final.get("results", [])}
     for img in s["images"]:
         r = by_index.get(img["index"], {})
-        img.update({k: r.get(k) for k in ("image_type", "draft", "revision", "approved", "verification", "research", "error")})
+        img.update({k: r.get(k) for k in ("mode", "image_type", "classify_reason", "draft", "revision", "approved",
+                                   "verification", "research", "error")})
     if final.get("report"):
         s["report"] = {"text": final["report"], "qa": []}
     save_session(s)

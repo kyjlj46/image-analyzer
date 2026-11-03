@@ -48,6 +48,15 @@
   @keyframes pulse { 50% { opacity:.3; } }
   .empty { color:var(--muted); text-align:center; padding:80px 0; font-size:14px; }
 
+  .badge { font-size:11px; font-weight:600; padding:1px 7px; border-radius:999px; background:var(--soft); color:var(--accent); border:1px solid var(--line); }
+  .badge:empty { display:none; }
+  .typebox { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 10px; padding:9px 12px; margin-bottom:10px; border-radius:8px; background:var(--soft); border:1px solid var(--line); font-size:13.5px; }
+  .typebox[hidden] { display:none; }
+  .typebox .k { color:var(--muted); font-size:12px; }
+  .typebox .v { font-weight:700; color:var(--accent); }
+  .typebox .how { font-size:11px; padding:1px 7px; border-radius:999px; border:1px solid var(--line); color:var(--muted); }
+  .typebox .why { flex-basis:100%; color:var(--text); font-size:13px; line-height:1.5; }
+  .typebox .why:empty { display:none; }
   .panel { display:none; } .panel.on { display:block; }
   .phead { display:flex; gap:12px; align-items:flex-start; margin-bottom:10px; }
   .phead img { width:84px; height:84px; object-fit:cover; border-radius:8px; border:1px solid var(--line); flex:none; }
@@ -156,12 +165,18 @@ $("review").onchange = e => { $("maxrev").disabled = !e.target.checked; };
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 
 function createPanel(key, title, imgSrc) {
-  const tab = el("button"); const dot = el("span", "dot"); tab.append(dot, title);
+  const tab = el("button"); const dot = el("span", "dot"), badge = el("span", "badge"); tab.append(dot, title, badge);
   tab.onclick = () => select(key); $("tabs").append(tab);
 
   const root = el("div", "panel"), head = el("div", "phead"), steps = el("ul", "steps"), out = el("pre", "out");
   if (imgSrc) { const im = el("img"); im.src = imgSrc; head.append(im); }
-  head.append(steps); root.append(head, out);
+  head.append(steps); root.append(head);
+  // 판별된 이미지 유형 표시
+  const typebox = el("div", "typebox"); typebox.hidden = true;
+  const typeVal = el("span", "v"), typeHow = el("span", "how"), typeWhy = el("span", "why");
+  typebox.append(el("span", "k", "이미지 유형"), typeVal, typeHow, typeWhy);
+  if (key !== "report") root.append(typebox);
+  root.append(out);
 
   const chat = el("div", "chat"); chat.append(el("h3", null, key === "report" ? "리포트에 대해 질문하기" : "이 이미지에 대해 질문하기"));
   const msgs = el("div", "msgs"), ask = el("div", "ask"), input = el("textarea"), btn = el("button", "btn", "질문");
@@ -170,7 +185,7 @@ function createPanel(key, title, imgSrc) {
   ask.append(input, btn); chat.append(msgs, ask, opt); root.append(chat);
   $("panels").append(root);
 
-  const p = { key, tab, dot, root, steps, out, msgs, input, btn, web, draft: "", verify: "", research: "", report: "", ready: false };
+  const p = { key, tab, dot, badge, typebox, typeVal, typeHow, typeWhy, root, steps, out, msgs, input, btn, web, draft: "", verify: "", research: "", report: "", ready: false };
   btn.onclick = () => askQuestion(p);
   input.onkeydown = e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); askQuestion(p); } };
   panels[key] = p; return p;
@@ -221,7 +236,15 @@ function onAnalyzeEvent(ev) {
       if (p.key === "report") p.dot.className = "dot run"; break;
     case "reset": p[ev.part] = ""; renderOut(p); break;
     case "token": p[ev.part] += ev.text; renderOut(p); break;
-    case "image_done": p.dot.className = "dot " + (ev.error ? "err" : "ok"); setReady(p, !ev.error); break;
+    case "classified":
+      p.badge.textContent = ev.short;
+      p.typeVal.textContent = ev.label;
+      p.typeHow.textContent = ev.auto ? "에이전트 자동 판별" : "사용자 지정";
+      p.typeWhy.textContent = ev.reason ? "판별 근거: " + ev.reason : "";
+      p.typebox.hidden = false; break;
+    case "image_done":
+      p.dot.className = "dot " + (ev.error ? "err" : "ok"); setReady(p, !ev.error);
+      if (ev.short && !p.badge.textContent) p.badge.textContent = ev.short; break;
     case "error": addStep(p, "오류: " + ev.message, null, "err"); p.dot.className = "dot err"; break;
   }
 }

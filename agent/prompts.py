@@ -7,6 +7,9 @@ IMAGE_TYPES = {
     "custom": "사용자 지정",
 }
 
+# 탭 배지 등에 쓰는 짧은 이름
+TYPE_SHORT = {"general": "일반", "document": "문서", "chart": "차트", "custom": "사용자 지정"}
+
 ANALYST_SYSTEM = """당신은 이미지 분석 전문가입니다. 주어진 이미지 파일을 Read 도구로 연 뒤, 단순 OCR이 아니라 \
 '이해'한 내용을 이미지를 보지 못한 사람도 완전히 파악할 수 있는 텍스트 문서로 작성합니다.
 
