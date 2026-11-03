@@ -15,7 +15,8 @@
 - **여러 장 동시 분석**: 최대 10장, 동시 처리 개수 1~5 선택 (LangGraph `Send`로 병렬 실행)
 - **자동 유형 판별**: 문서 / 차트 / 일반 이미지를 판별해 맞는 분석 방식 선택
 - **검토 · 재작성**: 검토자가 원본과 대조해 부족하면 피드백을 주고 다시 작성 (최대 1~3회)
-- **웹 검색 검증**: 브랜드·장소·인물 등 고유 정보를 Claude Code WebSearch로 사실 확인 (출처 URL 포함)
+- **웹 검색 검증**: 브랜드·장소·인물 등 고유 정보를 Claude Code WebSearch로 사실 확인 (출처 URL 포함) → `[웹 검증]`
+- **웹서칭**: 이미지 속 대상의 배경 정보·최신 정보·관련 링크를 웹에서 조사 → `[웹서칭]` (웹 검증과 동시 실행)
 - **종합 리포트**: 2장 이상이면 전체를 묶어 공통점·차이점·인사이트 정리
 - **추가 질문**: 분석 후 이미지 탭이나 리포트 탭에서 질문 (웹 검색 허용 선택 가능). Q&A도 .txt에 저장
 
@@ -25,7 +26,8 @@
 batch_graph   START ─(Send × N, 병렬)─▶ process_image ─▶ collect ─▶ [report] ─▶ END
                                             │
 image_graph   START ─┬─(자동)─▶ classify ─┐ ▼
-                     └────────────────────┴─▶ analyze ─▶ [review ⟲ analyze] ─▶ [verify] ─▶ END
+                     └────────────────────┴─▶ analyze ─▶ [review ⟲ analyze] ─┬─▶ [verify]   ─▶ END
+                                                                             └─▶ [research] ─▶ END
 
 qa_graph      START ─▶ answer ─▶ END   (Read, 웹 허용 시 Read+WebSearch)
 ```
@@ -36,6 +38,7 @@ qa_graph      START ─▶ answer ─▶ END   (Read, 웹 허용 시 Read+WebSea
 | analyze | 유형별 프롬프트로 분석 문서 작성, 피드백 반영 재작성 | Read |
 | review | 원본과 대조해 정확성·완전성·형식 검토 | Read |
 | verify | 고유 정보를 웹 검색으로 사실 확인 | Read, WebSearch |
+| research | 웹서칭: 대상의 배경·최신 정보·관련 링크 조사 | Read, WebSearch |
 | report | 여러 장의 분석을 묶어 종합 리포트 | Read |
 | answer | 분석 후 추가 질문에 답변 (이전 대화 기억) | Read (+WebSearch) |
 

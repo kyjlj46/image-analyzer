@@ -100,13 +100,16 @@
         <label><input type="checkbox" id="verify"><span>웹 검색 검증<small>브랜드·장소·인물 등을 WebSearch로 사실 확인</small></span></label>
       </div>
       <div class="opt">
+        <label><input type="checkbox" id="research"><span>웹서칭<small>이미지 속 대상의 배경·최신 정보·관련 링크를 조사해 [웹서칭]으로 추가</small></span></label>
+      </div>
+      <div class="opt">
         <label><input type="checkbox" id="report" checked><span>종합 리포트<small>2장 이상일 때 전체를 묶어 분석</small></span></label>
       </div>
       <div class="opt">
         <span>동시 처리<small>여러 장을 한 번에 분석할 개수</small></span>
         <select id="concurrency"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
       </div>
-      <div class="flow">흐름: 유형 판별 → 분석 → 검토 → 웹 검증 → (여러 장이면) 종합 리포트<br>단계마다 Claude를 호출하므로 켜는 단계가 많을수록 시간이 더 걸립니다.</div>
+      <div class="flow">흐름: 유형 판별 → 분석 → 검토 → 웹 검증·웹서칭(동시) → (여러 장이면) 종합 리포트<br>단계마다 Claude를 호출하므로 켜는 단계가 많을수록 시간이 더 걸립니다.</div>
 
       <button id="run" class="btn" disabled>분석 시작</button>
     </section>
@@ -126,7 +129,7 @@
 </main>
 <script>
 const $ = id => document.getElementById(id);
-const NODE_LABEL = { classify:"판별", analyze:"분석", review:"검토", verify:"웹 검증", report:"리포트", answer:"답변" };
+const NODE_LABEL = { classify:"판별", analyze:"분석", review:"검토", verify:"웹 검증", research:"웹서칭", report:"리포트", answer:"답변" };
 let files = [], sessionId = null, panels = {}, current = null, running = false, asking = false;
 
 // ── 업로드 ──
@@ -167,7 +170,7 @@ function createPanel(key, title, imgSrc) {
   ask.append(input, btn); chat.append(msgs, ask, opt); root.append(chat);
   $("panels").append(root);
 
-  const p = { key, tab, dot, root, steps, out, msgs, input, btn, web, draft: "", verify: "", report: "", ready: false };
+  const p = { key, tab, dot, root, steps, out, msgs, input, btn, web, draft: "", verify: "", research: "", report: "", ready: false };
   btn.onclick = () => askQuestion(p);
   input.onkeydown = e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); askQuestion(p); } };
   panels[key] = p; return p;
@@ -177,7 +180,8 @@ function select(key) {
   for (const p of Object.values(panels)) { p.tab.classList.toggle("on", p.key === key); p.root.classList.toggle("on", p.key === key); }
 }
 function renderOut(p) {
-  p.out.textContent = p.key === "report" ? p.report : p.draft + (p.verify ? "\n\n[웹 검증]\n" + p.verify : "");
+  p.out.textContent = p.key === "report" ? p.report
+    : p.draft + (p.verify ? "\n\n[웹 검증]\n" + p.verify : "") + (p.research ? "\n\n[웹서칭]\n" + p.research : "");
   p.out.scrollTop = p.out.scrollHeight;
 }
 function addStep(p, text, node, cls) {
@@ -226,7 +230,7 @@ $("run").onclick = async () => {
   const fd = new FormData();
   files.forEach(f => fd.append("files", f));
   for (const [k, id] of [["mode","mode"],["instruction","instruction"],["max_revisions","maxrev"],["concurrency","concurrency"]]) fd.append(k, $(id).value);
-  for (const id of ["review", "verify", "report"]) fd.append(id, $(id).checked);
+  for (const id of ["review", "verify", "research", "report"]) fd.append(id, $(id).checked);
 
   running = true; sessionId = null; $("run").disabled = $("download").disabled = $("copy").disabled = true;
   $("status").textContent = "에이전트 실행 중…";

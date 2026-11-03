@@ -2,9 +2,12 @@
 
 1) image_graph - 이미지 1장 처리
     START ─┬─(auto)─▶ classify ─┐
-           └─────────────────────┴─▶ analyze ─▶ [review ⟲ analyze] ─▶ [verify] ─▶ END
+           └─────────────────────┴─▶ analyze ─▶ [review ⟲ analyze] ─┬─▶ [verify]   ─▶ END
+                                                                    └─▶ [research] ─▶ END
        review: 원본과 대조, 수정 필요하면 analyze로 되돌림 (최대 max_revisions회)
        verify: WebSearch로 고유 정보 사실 확인 (옵션)
+       research(웹서칭): WebSearch로 이미지 속 대상의 관련 정보 조사 (옵션)
+       verify와 research는 둘 다 켜면 병렬로 실행된다.
 
 2) batch_graph - 여러 장을 동시에 처리하고 종합 리포트
     START ─(Send × N, 병렬)─▶ process_image(image_graph) ─▶ collect ─▶ [report] ─▶ END
@@ -58,6 +61,7 @@ class ImageState(TypedDict, total=False):
     review_enabled: bool
     max_revisions: int
     verify_enabled: bool
+    research_enabled: bool
     # 중간/결과
     image_type: str
     classify_reason: str
@@ -67,6 +71,7 @@ class ImageState(TypedDict, total=False):
     approved: bool
     retry: bool
     verification: str
+    research: str
 
 
 def classify(state: ImageState) -> dict:
@@ -131,8 +136,26 @@ def verify(state: ImageState) -> dict:
     return {"verification": text}
 
 
-def _after_draft(state: ImageState) -> str:
-    return "verify" if state.get("verify_enabled") else END
+def research(state: ImageState) -> dict:
+    i, p = state["index"], Path(state["image_path"])
+    emit(i, type="status", node="research", message="웹서칭: 관련 정보 조사 중…")
+    instruction = state.get("instruction", "").strip()
+    text = stream_into(i, "research", llm.stream_text(
+        prompts.RESEARCH_PROMPT.format(image_file=p.name, draft=state["draft"], max_items=4,
+                                       instruction=f"\n[사용자 추가 지시]\n{instruction}\n" if instruction else ""),
+        prompts.RESEARCHER_SYSTEM, p.parent, tools="Read,WebSearch",
+    ))
+    emit(i, type="status", node="research", message="웹서칭 완료 ✓")
+    return {"research": text}
+
+
+WEB_STEPS = (("verify", "verify_enabled"), ("research", "research_enabled"))
+
+
+def _after_draft(state: ImageState):
+    """분석이 확정된 뒤 켜진 웹 단계들로 보낸다. 여러 개면 리스트를 반환해 병렬 실행."""
+    steps = [node for node, flag in WEB_STEPS if state.get(flag)]
+    return steps or END
 
 
 def route_start(state: ImageState) -> str:
@@ -153,11 +176,13 @@ def build_image_graph():
     g.add_node("analyze", analyze)
     g.add_node("review", review)
     g.add_node("verify", verify)
+    g.add_node("research", research)
     g.add_conditional_edges(START, route_start, ["classify", "analyze"])
     g.add_edge("classify", "analyze")
-    g.add_conditional_edges("analyze", route_after_analyze, ["review", "verify", END])
-    g.add_conditional_edges("review", route_after_review, ["analyze", "verify", END])
+    g.add_conditional_edges("analyze", route_after_analyze, ["review", "verify", "research", END])
+    g.add_conditional_edges("review", route_after_review, ["analyze", "verify", "research", END])
     g.add_edge("verify", END)
+    g.add_edge("research", END)
     return g.compile()
 
 
@@ -166,7 +191,7 @@ image_graph = build_image_graph()
 
 # ═══ 2) 여러 장 병렬 처리 + 종합 리포트 ══════════════════════════════════
 
-RESULT_KEYS = ("index", "name", "image_path", "image_type", "draft", "revision", "approved", "verification", "error")
+RESULT_KEYS = ("index", "name", "image_path", "image_type", "draft", "revision", "approved", "verification", "research", "error")
 
 
 class BatchState(TypedDict, total=False):
@@ -211,6 +236,7 @@ def report(state: BatchState) -> dict:
     analyses = "\n\n".join(
         f"=== 이미지 {r['index']}: {r['name']} (파일 {Path(r['image_path']).name}) ===\n{r['draft']}"
         + (f"\n\n[웹 검증]\n{r['verification']}" if r.get("verification") else "")
+        + (f"\n\n[웹서칭]\n{r['research']}" if r.get("research") else "")
         for r in results
     )
     instruction = state["options"].get("instruction", "").strip()

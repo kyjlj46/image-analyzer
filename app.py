@@ -1,6 +1,6 @@
 """이미지 분석 에이전트 웹 서버.
 
-- POST /api/analyze : 이미지 여러 장 → batch_graph(병렬 분석 + 검토 + 웹 검증 + 종합 리포트)
+- POST /api/analyze : 이미지 여러 장 → batch_graph(병렬 분석 + 검토 + 웹 검증 + 웹서칭 + 종합 리포트)
 - POST /api/ask     : 분석이 끝난 뒤 이미지/리포트에 대한 추가 질문 → qa_graph
 - GET  /api/download/{session_id} : 결과 .txt (추가 질문 포함)
 
@@ -75,6 +75,8 @@ def render_txt(s: dict) -> str:
         out.append(f"{head}\n{line}\n\n{img.get('draft') or ('[오류] ' + (img.get('error') or '분석 결과 없음'))}")
         if img.get("verification"):
             out.append(f"\n[웹 검증]\n{img['verification']}")
+        if img.get("research"):
+            out.append(f"\n[웹서칭]\n{img['research']}")
         out += _qa_txt(img.get("qa"))
         out.append("")
     if s.get("report"):
@@ -114,7 +116,7 @@ def run_analysis(s: dict, options: dict, report_enabled: bool, concurrency: int)
     by_index = {r["index"]: r for r in final.get("results", [])}
     for img in s["images"]:
         r = by_index.get(img["index"], {})
-        img.update({k: r.get(k) for k in ("image_type", "draft", "revision", "approved", "verification", "error")})
+        img.update({k: r.get(k) for k in ("image_type", "draft", "revision", "approved", "verification", "research", "error")})
     if final.get("report"):
         s["report"] = {"text": final["report"], "qa": []}
     save_session(s)
@@ -129,6 +131,7 @@ async def analyze(
     review: bool = Form(True),
     max_revisions: int = Form(1),
     verify: bool = Form(False),
+    research: bool = Form(False),
     report: bool = Form(True),
     concurrency: int = Form(3),
 ):
@@ -161,7 +164,8 @@ async def analyze(
                "filename": f"{datetime.now():%Y%m%d_%H%M%S}_{stem}.txt"}
 
     options = {"mode": mode, "instruction": instruction, "review_enabled": review,
-               "max_revisions": max(0, min(max_revisions, 3)), "verify_enabled": verify}
+               "max_revisions": max(0, min(max_revisions, 3)), "verify_enabled": verify,
+               "research_enabled": research}
     return StreamingResponse(run_analysis(session, options, report, max(1, min(concurrency, 5))),
                              media_type="application/x-ndjson")
 
@@ -187,7 +191,9 @@ def run_qa(s: dict, req: AskRequest):
         holder = next(i for i in s["images"] if str(i["index"]) == req.target)
         paths = [str(folder / holder["file"])]
         names = [holder["name"]]
-        context = (holder.get("draft") or "") + (f"\n\n[웹 검증]\n{holder['verification']}" if holder.get("verification") else "")
+        context = ((holder.get("draft") or "")
+                   + (f"\n\n[웹 검증]\n{holder['verification']}" if holder.get("verification") else "")
+                   + (f"\n\n[웹서칭]\n{holder['research']}" if holder.get("research") else ""))
 
     final: dict = {}
     try:
