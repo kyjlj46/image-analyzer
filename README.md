@@ -15,7 +15,7 @@
 - **여러 장 동시 분석**: 최대 10장, 동시 처리 개수 1~5 선택 (LangGraph `Send`로 병렬 실행)
 - **자동 유형 판별**: 문서 / 차트 / 일반 이미지를 판별해 맞는 분석 방식 선택
 - **검토 · 재작성**: 검토자가 원본과 대조해 부족하면 피드백을 주고 다시 작성 (최대 1~3회)
-- **웹 검색 검증**: 브랜드·장소·인물 등 고유 정보를 Claude Code WebSearch로 사실 확인 (출처 URL 포함) → `[웹 검증]`
+- **웹 검색 검증**: 브랜드·장소·인물 등 고유 정보를 웹 도구(MCP 서버)로 사실 확인 (출처 URL 포함) → `[웹 검증]`
 - **웹서칭**: 이미지 속 대상의 배경 정보·최신 정보·관련 링크를 웹에서 조사 → `[웹서칭]` (웹 검증과 동시 실행)
 - **종합 리포트**: 2장 이상이면 전체를 묶어 공통점·차이점·인사이트 정리
 - **추가 질문**: 분석 후 이미지 탭이나 리포트 탭에서 질문 (웹 검색 허용 선택 가능). Q&A도 .txt에 저장
@@ -29,7 +29,7 @@ image_graph   START ─┬─(자동)─▶ classify ─┐ ▼
                      └────────────────────┴─▶ analyze ─▶ [review ⟲ analyze] ─┬─▶ [verify]   ─▶ END
                                                                              └─▶ [research] ─▶ END
 
-qa_graph      START ─▶ answer ─▶ END   (Read, 웹 허용 시 Read+WebSearch)
+qa_graph      START ─▶ answer ─▶ END   (Read, 웹 허용 시 Read+웹 도구)
 ```
 
 | 노드 | 하는 일 | 쓰는 도구 |
@@ -37,17 +37,35 @@ qa_graph      START ─▶ answer ─▶ END   (Read, 웹 허용 시 Read+WebSea
 | classify | 이미지 유형 판별 (document / chart / general) | Read |
 | analyze | 유형별 프롬프트로 분석 문서 작성, 피드백 반영 재작성 | Read |
 | review | 원본과 대조해 정확성·완전성·형식 검토 | Read |
-| verify | 고유 정보를 웹 검색으로 사실 확인 | Read, WebSearch |
-| research | 웹서칭: 대상의 배경·최신 정보·관련 링크 조사 | Read, WebSearch |
+| verify | 고유 정보를 웹 검색으로 사실 확인 | Read, 웹 도구 |
+| research | 웹서칭: 대상의 배경·최신 정보·관련 링크 조사 | Read, 웹 도구 |
 | report | 여러 장의 분석을 묶어 종합 리포트 | Read |
-| answer | 분석 후 추가 질문에 답변 (이전 대화 기억) | Read (+WebSearch) |
+| answer | 분석 후 추가 질문에 답변 (이전 대화 기억) | Read (+웹 도구) |
+
+## 웹 도구: MCP 서버 연결
+
+웹 검증·웹서칭·추가 질문의 웹 검색은 별도 프로젝트인 [mcp-tools-server](https://github.com/kyjlj46/mcp-tools-server)의 MCP 도구를 씁니다.
+이 도구들은 LLM이 tool calling으로 직접 고르고 호출합니다.
+
+- 쓰는 도구: `web_search`, `news_search`, `fetch_url`, `wikipedia`, `current_time`, `calculate`
+- 연결: 두 프로젝트를 나란히 두고(`.../image-analyzer`, `.../mcp-tools-server`) 각각 `uv sync`를 하면 자동으로 연결됩니다.
+  - 다른 위치에 두었다면 환경변수 `MCP_TOOLS_DIR`에 그 폴더를 지정하세요.
+- mcp-tools-server가 없거나 `USE_MCP=0`이면 Claude Code 내장 WebSearch로 대신합니다.
+- 분석할 때는 `--strict-mcp-config`를 쓰므로, 사용자가 Claude Code에 따로 등록한 MCP 서버는 불러오지 않습니다.
+
+```
+analyze ─▶ verify / research / answer ──(claude -p --mcp-config)──▶ mcp-tools-server (stdio)
+                                                                    ├ web_search · news_search
+                                                                    ├ fetch_url · wikipedia
+                                                                    └ current_time · calculate
+```
 
 ## 파일 구성
 | 파일 | 역할 |
 |---|---|
 | `agent/graph.py` | 상태, 노드, 라우팅, 3개 그래프 정의 |
 | `agent/prompts.py` | 노드별 프롬프트, 이미지 유형 목록 |
-| `agent/llm.py` | LLM 호출 계층 (`claude -p` CLI 래퍼, 노드별 도구 제한) |
+| `agent/llm.py` | LLM 호출 계층 (`claude -p` CLI 래퍼, 노드별 도구 제한, MCP 서버 연결 `WEB_TOOLS`) |
 | `app.py` | FastAPI 서버. `/api/analyze`, `/api/ask`, `/api/download`. 이벤트를 NDJSON으로 스트리밍 |
 | `static/index.html` | 웹 화면 (이미지별 탭 · 단계 로그 · 결과 · 질문 채팅) |
 | `run.py`, `start.bat` | 실행기 (.venv 자동 준비) |
@@ -59,7 +77,8 @@ qa_graph      START ─▶ answer ─▶ END   (Read, 웹 허용 시 Read+WebSea
   UI에 진행 상황을 보내려면 노드 안에서 `emit(index, type="status", node="...", message="...")`,
   텍스트를 흘려보내려면 `stream_into(index, part, llm.stream_text(...))`.
 - **이미지 유형 추가**: `agent/prompts.py`의 `IMAGE_TYPES`, `ANALYZE_PROMPTS`, `CLASSIFY_PROMPT`.
-- **도구 추가**: `llm.stream_text(..., tools="Read,WebSearch,WebFetch")`처럼 노드별로 Claude Code 도구 허용.
+- **도구 추가**: 새 도구는 mcp-tools-server에 `@server.tool()` 함수로 만들고, `agent/llm.py`의 `MCP_WEB_TOOLS`에 이름을 추가하면 됩니다.
+  노드별로 허용할 도구는 `llm.stream_text(..., tools="Read,mcp__tools__fetch_url")` 형식으로 지정합니다.
 - **LLM 교체**: `agent/llm.py`의 `stream_text()` / `complete()`만 바꾸면 됨 (예: Anthropic API).
 
 ## 필요 조건

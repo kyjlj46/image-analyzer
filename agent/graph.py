@@ -5,15 +5,15 @@
            └─────────────────────┴─▶ analyze ─▶ [review ⟲ analyze] ─┬─▶ [verify]   ─▶ END
                                                                     └─▶ [research] ─▶ END
        review: 원본과 대조, 수정 필요하면 analyze로 되돌림 (최대 max_revisions회)
-       verify: WebSearch로 고유 정보 사실 확인 (옵션)
-       research(웹서칭): WebSearch로 이미지 속 대상의 관련 정보 조사 (옵션)
+       verify: 웹 검색 도구로 고유 정보 사실 확인 (옵션)
+       research(웹서칭): 웹 검색 도구로 이미지 속 대상의 관련 정보 조사 (옵션)
        verify와 research는 둘 다 켜면 병렬로 실행된다.
 
 2) batch_graph - 여러 장을 동시에 처리하고 종합 리포트
     START ─(Send × N, 병렬)─▶ process_image(image_graph) ─▶ collect ─▶ [report] ─▶ END
 
 3) qa_graph - 분석이 끝난 뒤 추가 질문
-    START ─▶ answer ─▶ END      (웹 검색 허용 시 Read+WebSearch 도구 사용)
+    START ─▶ answer ─▶ END      (웹 검색 허용 시 Read+웹 도구 사용)
 
 확장 방법:
 - 노드 추가: (state) -> dict 함수를 만들고 build_*_graph()에서 add_node / add_edge.
@@ -135,7 +135,7 @@ def verify(state: ImageState) -> dict:
     emit(i, type="status", node="verify", message="웹 검색으로 사실 확인 중…")
     text = stream_into(i, "verify", llm.stream_text(
         prompts.VERIFY_PROMPT.format(image_file=p.name, draft=state["draft"], max_items=5),
-        prompts.VERIFIER_SYSTEM, p.parent, tools="Read,WebSearch",
+        prompts.VERIFIER_SYSTEM, p.parent, tools=llm.WEB_TOOLS,
     ))
     emit(i, type="status", node="verify", message="웹 검증 완료 ✓")
     return {"verification": text}
@@ -148,7 +148,7 @@ def research(state: ImageState) -> dict:
     text = stream_into(i, "research", llm.stream_text(
         prompts.RESEARCH_PROMPT.format(image_file=p.name, draft=state["draft"], max_items=4,
                                        instruction=f"\n[사용자 추가 지시]\n{instruction}\n" if instruction else ""),
-        prompts.RESEARCHER_SYSTEM, p.parent, tools="Read,WebSearch",
+        prompts.RESEARCHER_SYSTEM, p.parent, tools=llm.WEB_TOOLS,
     ))
     emit(i, type="status", node="research", message="웹서칭 완료 ✓")
     return {"research": text}
@@ -294,7 +294,7 @@ def answer(state: QAState) -> dict:
         prompts.QA_PROMPT.format(files=_file_names(paths, state.get("image_names")), context=state["context"],
                                  history=history, question=state["question"]),
         prompts.QA_SYSTEM, paths[0].parent,
-        tools="Read,WebSearch" if state.get("web_enabled") else "Read",
+        tools=llm.WEB_TOOLS if state.get("web_enabled") else "Read",
     ))
     return {"answer": text}
 

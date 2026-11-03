@@ -3,10 +3,13 @@
 API 키 없이 이 PC의 Claude Code 계정으로 동작한다. 다른 LLM(예: Anthropic API)으로 바꾸려면
 이 파일의 stream_text() / complete()만 교체하면 그래프와 노드는 그대로 쓸 수 있다.
 
-노드별로 쓸 수 있는 도구를 tools 인자로 제한한다. 예) "Read", "Read,WebSearch"
+노드별로 쓸 수 있는 도구를 tools 인자로 제한한다. 예) "Read", WEB_TOOLS
+"mcp__"로 시작하는 이름은 MCP 서버 도구다. 웹 도구는 별도 프로젝트 mcp-tools-server(MCP 서버)를 쓰고,
+그 프로젝트가 없으면 Claude Code 내장 WebSearch로 대신한다.
 """
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -23,6 +26,37 @@ class LLMError(RuntimeError):
     pass
 
 
+# ── MCP 서버 (웹 도구) ─────────────────────────────────────────────────
+# 기본 위치: 이 프로젝트 옆 폴더 ../mcp-tools-server. 다른 곳이면 환경변수 MCP_TOOLS_DIR로 지정.
+# USE_MCP=0 이면 MCP 서버를 쓰지 않고 내장 WebSearch를 쓴다.
+
+MCP_SERVER_NAME = "tools"
+MCP_WEB_TOOLS = ("web_search", "news_search", "fetch_url", "wikipedia", "current_time", "calculate")
+
+
+def _mcp_config() -> dict | None:
+    if os.environ.get("USE_MCP", "1") == "0":
+        return None
+    root = Path(os.environ.get("MCP_TOOLS_DIR") or Path(__file__).resolve().parents[2] / "mcp-tools-server")
+    if not (root / "src" / "mcp_tools_server").is_dir():
+        return None
+    python = root / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if python.exists():
+        server = {"command": str(python), "args": ["-m", "mcp_tools_server"]}
+    elif shutil.which("uv"):
+        server = {"command": shutil.which("uv"), "args": ["run", "--directory", str(root), "mcp-tools-server"]}
+    else:
+        return None
+    return {"mcpServers": {MCP_SERVER_NAME: server}}
+
+
+MCP_CONFIG = _mcp_config()
+
+# 웹 검색이 필요한 노드가 쓰는 도구 묶음
+WEB_TOOLS = ("Read," + ",".join(f"mcp__{MCP_SERVER_NAME}__{t}" for t in MCP_WEB_TOOLS)) if MCP_CONFIG else "Read,WebSearch"
+WEB_BACKEND = "MCP 서버 (mcp-tools-server)" if MCP_CONFIG else "Claude Code 내장 WebSearch"
+
+
 def _find_claude() -> str:
     exe = shutil.which("claude") or str(Path.home() / ".local" / "bin" / "claude.exe")
     if not Path(exe).exists():
@@ -31,14 +65,19 @@ def _find_claude() -> str:
 
 
 def _events(prompt: str, system: str, workdir: Path, tools: str) -> Iterator[dict]:
+    names = [t for t in tools.split(",") if t]
+    builtin = ",".join(t for t in names if not t.startswith("mcp__"))
     cmd = [
         _find_claude(), "-p", prompt,
-        "--tools", tools,            # 모델에게 보이는 도구 자체를 제한 (파일 쓰기 등 차단)
-        "--allowedTools", tools,
+        "--tools", builtin,          # 모델에게 보이는 내장 도구 자체를 제한 (파일 쓰기 등 차단)
+        "--allowedTools", ",".join(names),
+        "--strict-mcp-config",       # 사용자 전역 MCP 서버는 불러오지 않는다
         "--no-session-persistence",  # 분석 호출이 Claude Code 세션 기록에 쌓이지 않게
         "--append-system-prompt", system,
         "--output-format", "stream-json", "--verbose", "--include-partial-messages",
     ]
+    if MCP_CONFIG and any(t.startswith("mcp__") for t in names):
+        cmd += ["--mcp-config", json.dumps(MCP_CONFIG)]
     proc = subprocess.Popen(
         cmd, cwd=workdir, stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8", errors="replace",
