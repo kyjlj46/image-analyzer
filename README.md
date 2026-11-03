@@ -44,7 +44,7 @@ qa_graph      START ─▶ answer ─▶ END   (Read, 웹 허용 시 Read+웹 �
 
 ## 웹 도구: MCP 서버 연결
 
-웹 검증·웹서칭·추가 질문의 웹 검색은 별도 프로젝트인 [mcp-tools-server](https://github.com/kyjlj46/mcp-tools-server)의 MCP 도구를 씁니다.
+웹 검증·웹서칭·추가 질문의 웹 검색은 별도 프로젝트인 [mcp-tools-server](https://github.com/kyjlj46/mcp-tools-server-)의 MCP 도구를 씁니다.
 이 도구들은 LLM이 tool calling으로 직접 고르고 호출합니다.
 
 - 쓰는 도구: `web_search`, `news_search`, `fetch_url`, `wikipedia`, `current_time`, `calculate`
