@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>이미지 분석 에이전트</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1d2433; --muted:#6b7385; --line:#e2e5ea; --accent:#c96442; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16181d; --card:#1f232a; --text:#e7e9ee; --muted:#9aa1b0; --line:#323844; --accent:#e07a55; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,"Segoe UI","Malgun Gothic",sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width:1100px; margin:0 auto; padding:28px 16px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 20px; font-size:14px; }
+  .grid { display:grid; grid-template-columns:380px 1fr; gap:16px; }
+  @media (max-width:860px){ .grid{ grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  #drop { border:2px dashed var(--line); border-radius:10px; padding:28px 12px; text-align:center; color:var(--muted); cursor:pointer; transition:.15s; }
+  #drop.over { border-color:var(--accent); color:var(--accent); }
+  #thumbs { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:12px; }
+  #thumbs div { position:relative; }
+  #thumbs img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:8px; border:1px solid var(--line); }
+  #thumbs button { position:absolute; top:4px; right:4px; border:0; border-radius:50%; width:22px; height:22px; background:#000a; color:#fff; cursor:pointer; }
+  label { display:block; font-size:13px; font-weight:600; margin:14px 0 6px; }
+  select, textarea { width:100%; font:inherit; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--text); }
+  textarea { min-height:80px; resize:vertical; }
+  .btn { font:inherit; font-weight:600; border:0; border-radius:8px; padding:10px 14px; cursor:pointer; background:var(--accent); color:#fff; }
+  .btn.ghost { background:transparent; color:var(--text); border:1px solid var(--line); }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  #run { width:100%; margin-top:16px; }
+  .out-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px; }
+  .out-head .actions { display:flex; gap:6px; }
+  #status { color:var(--muted); font-size:13px; }
+  #output { white-space:pre-wrap; word-break:break-word; font-family:ui-monospace,Consolas,"D2Coding",monospace; font-size:13.5px; line-height:1.6; min-height:420px; max-height:70vh; overflow:auto; margin:0; padding:12px; background:var(--bg); border-radius:8px; border:1px solid var(--line); }
+</style>
+</head>
+<body>
+<main>
+  <h1>이미지 분석 에이전트</h1>
+  <p class="sub">이미지를 올리면 Claude가 내용을 이해하고 분석해서 텍스트(.txt) 문서로 만들어 줍니다.</p>
+  <div class="grid">
+    <section class="card">
+      <div id="drop">이미지를 끌어다 놓거나 클릭해서 선택<br><small>JPEG · PNG · GIF · WEBP, 장당 5MB 이하, 여러 장 가능</small></div>
+      <input id="file" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple hidden>
+      <div id="thumbs"></div>
+
+      <label for="mode">분석 모드</label>
+      <select id="mode">
+        <option value="general">종합 분석 (사진·일반 이미지)</option>
+        <option value="document">문서 / 스크린샷 재구성</option>
+        <option value="chart">차트 / 그래프 데이터 추출</option>
+        <option value="custom">사용자 지정</option>
+      </select>
+
+      <label for="instruction">추가 지시 (선택)</label>
+      <textarea id="instruction" placeholder="예: 영어로 작성해줘 / 제품의 결함 위주로 봐줘 / 표는 CSV 형태로"></textarea>
+
+      <button id="run" class="btn" disabled>분석 시작</button>
+    </section>
+
+    <section class="card">
+      <div class="out-head">
+        <span id="status">결과가 여기에 표시됩니다.</span>
+        <div class="actions">
+          <button id="copy" class="btn ghost" disabled>복사</button>
+          <button id="download" class="btn" disabled>.txt 다운로드</button>
+        </div>
+      </div>
+      <pre id="output"></pre>
+    </section>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const drop = $("drop"), fileInput = $("file"), thumbs = $("thumbs");
+const runBtn = $("run"), output = $("output"), statusEl = $("status");
+const copyBtn = $("copy"), dlBtn = $("download");
+let files = [], savedName = null;
+
+function render() {
+  thumbs.innerHTML = "";
+  files.forEach((f, i) => {
+    const d = document.createElement("div");
+    const img = document.createElement("img");
+    img.src = URL.createObjectURL(f); img.title = f.name;
+    const x = document.createElement("button"); x.textContent = "×";
+    x.onclick = () => { files.splice(i, 1); render(); };
+    d.append(img, x); thumbs.append(d);
+  });
+  runBtn.disabled = files.length === 0;
+}
+function addFiles(list) {
+  for (const f of list) if (f.type.startsWith("image/")) files.push(f);
+  render();
+}
+drop.onclick = () => fileInput.click();
+fileInput.onchange = e => { addFiles(e.target.files); fileInput.value = ""; };
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); addFiles(e.dataTransfer.files); };
+document.addEventListener("paste", e => addFiles([...e.clipboardData.files]));
+
+runBtn.onclick = async () => {
+  const fd = new FormData();
+  files.forEach(f => fd.append("files", f));
+  fd.append("mode", $("mode").value);
+  fd.append("instruction", $("instruction").value);
+
+  output.textContent = ""; savedName = null;
+  runBtn.disabled = copyBtn.disabled = dlBtn.disabled = true;
+  statusEl.textContent = "분석 중…";
+  try {
+    const res = await fetch("/api/analyze", { method: "POST", body: fd });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || res.statusText);
+    }
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const m = buf.match(/\n<<SAVED:(.+?)>>$/);
+      if (m) { savedName = m[1]; output.textContent = buf.slice(0, m.index); }
+      else output.textContent = buf;
+      output.scrollTop = output.scrollHeight;
+    }
+    statusEl.textContent = savedName ? `완료 · outputs/${savedName} 에 저장됨` : "완료";
+  } catch (e) {
+    statusEl.textContent = "오류: " + e.message;
+  } finally {
+    runBtn.disabled = files.length === 0;
+    copyBtn.disabled = dlBtn.disabled = !output.textContent;
+  }
+};
+
+copyBtn.onclick = async () => {
+  await navigator.clipboard.writeText(output.textContent);
+  statusEl.textContent = "클립보드에 복사됨";
+};
+dlBtn.onclick = () => {
+  if (savedName) { location.href = "/api/download/" + encodeURIComponent(savedName); return; }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([output.textContent], { type: "text/plain;charset=utf-8" }));
+  a.download = "analysis.txt"; a.click();
+};
+</script>
+</body>
+</html>
