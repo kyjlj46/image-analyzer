@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 VENV = ROOT / ".venv"
 VENV_PY = VENV / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-HOST, PORT = "127.0.0.1", 8000
+HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", "8000"))
 
 
 def in_project_venv() -> bool:
@@ -21,7 +21,7 @@ def in_project_venv() -> bool:
 
 
 def deps_installed(py: Path) -> bool:
-    return subprocess.run([py, "-c", "import fastapi, uvicorn, multipart"],
+    return subprocess.run([py, "-c", "import fastapi, uvicorn, multipart, langgraph"],
                           capture_output=True).returncode == 0
 
 

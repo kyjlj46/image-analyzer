@@ -5,49 +5,61 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>이미지 분석 에이전트</title>
 <style>
-  :root { --bg:#f6f7f9; --card:#fff; --text:#1d2433; --muted:#6b7385; --line:#e2e5ea; --accent:#c96442; }
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1d2433; --muted:#6b7385; --line:#e2e5ea; --accent:#c96442; --ok:#2f8a4f; --warn:#b7791f; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#16181d; --card:#1f232a; --text:#e7e9ee; --muted:#9aa1b0; --line:#323844; --accent:#e07a55; }
+    :root { --bg:#16181d; --card:#1f232a; --text:#e7e9ee; --muted:#9aa1b0; --line:#323844; --accent:#e07a55; --ok:#5cc184; --warn:#e0b04f; }
   }
   * { box-sizing:border-box; }
   body { margin:0; font-family:system-ui,-apple-system,"Segoe UI","Malgun Gothic",sans-serif; background:var(--bg); color:var(--text); }
-  main { max-width:1100px; margin:0 auto; padding:28px 16px; }
+  main { max-width:1150px; margin:0 auto; padding:28px 16px; }
   h1 { font-size:22px; margin:0 0 4px; }
   .sub { color:var(--muted); margin:0 0 20px; font-size:14px; }
   .grid { display:grid; grid-template-columns:380px 1fr; gap:16px; }
   @media (max-width:860px){ .grid{ grid-template-columns:1fr; } }
   .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
-  #drop { border:2px dashed var(--line); border-radius:10px; padding:28px 12px; text-align:center; color:var(--muted); cursor:pointer; transition:.15s; }
+  #drop { border:2px dashed var(--line); border-radius:10px; padding:24px 12px; text-align:center; color:var(--muted); cursor:pointer; transition:.15s; }
   #drop.over { border-color:var(--accent); color:var(--accent); }
   #thumbs { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:12px; }
   #thumbs div { position:relative; }
   #thumbs img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:8px; border:1px solid var(--line); }
   #thumbs button { position:absolute; top:4px; right:4px; border:0; border-radius:50%; width:22px; height:22px; background:#000a; color:#fff; cursor:pointer; }
   label { display:block; font-size:13px; font-weight:600; margin:14px 0 6px; }
+  .row { display:flex; gap:10px; align-items:center; font-size:14px; margin-top:12px; }
+  .row label { margin:0; font-weight:500; display:flex; gap:6px; align-items:center; }
   select, textarea { width:100%; font:inherit; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--text); }
-  textarea { min-height:80px; resize:vertical; }
+  .row select { width:auto; padding:4px 8px; }
+  textarea { min-height:70px; resize:vertical; }
   .btn { font:inherit; font-weight:600; border:0; border-radius:8px; padding:10px 14px; cursor:pointer; background:var(--accent); color:#fff; }
   .btn.ghost { background:transparent; color:var(--text); border:1px solid var(--line); }
   .btn:disabled { opacity:.5; cursor:not-allowed; }
   #run { width:100%; margin-top:16px; }
+  .flow { font-size:12px; color:var(--muted); margin-top:10px; line-height:1.5; }
+  #steps { list-style:none; padding:0; margin:0 0 12px; font-size:13px; max-height:160px; overflow:auto; }
+  #steps li { padding:4px 0 4px 18px; position:relative; border-bottom:1px dashed var(--line); }
+  #steps li::before { content:"•"; position:absolute; left:4px; color:var(--accent); }
+  #steps li.img { font-weight:700; padding-left:0; }
+  #steps li.img::before { content:""; }
+  #steps li.err { color:#d33; }
+  #steps .node { display:inline-block; font-size:11px; padding:0 6px; border-radius:4px; border:1px solid var(--line); margin-right:6px; color:var(--muted); }
   .out-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px; }
   .out-head .actions { display:flex; gap:6px; }
   #status { color:var(--muted); font-size:13px; }
-  #output { white-space:pre-wrap; word-break:break-word; font-family:ui-monospace,Consolas,"D2Coding",monospace; font-size:13.5px; line-height:1.6; min-height:420px; max-height:70vh; overflow:auto; margin:0; padding:12px; background:var(--bg); border-radius:8px; border:1px solid var(--line); }
+  #output { white-space:pre-wrap; word-break:break-word; font-family:ui-monospace,Consolas,"D2Coding",monospace; font-size:13.5px; line-height:1.6; min-height:380px; max-height:65vh; overflow:auto; margin:0; padding:12px; background:var(--bg); border-radius:8px; border:1px solid var(--line); }
 </style>
 </head>
 <body>
 <main>
   <h1>이미지 분석 에이전트</h1>
-  <p class="sub">이미지를 올리면 Claude가 내용을 이해하고 분석해서 텍스트(.txt) 문서로 만들어 줍니다.</p>
+  <p class="sub">LangGraph 에이전트가 이미지 유형을 판별하고, 분석하고, 스스로 검토해서 텍스트(.txt) 문서로 만듭니다.</p>
   <div class="grid">
     <section class="card">
-      <div id="drop">이미지를 끌어다 놓거나 클릭해서 선택<br><small>JPEG · PNG · GIF · WEBP, 장당 5MB 이하, 여러 장 가능</small></div>
+      <div id="drop">이미지를 끌어다 놓거나 클릭해서 선택<br><small>JPEG · PNG · GIF · WEBP, 장당 5MB 이하, 여러 장 가능 · Ctrl+V 붙여넣기</small></div>
       <input id="file" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple hidden>
       <div id="thumbs"></div>
 
       <label for="mode">분석 모드</label>
       <select id="mode">
+        <option value="auto">자동 판별 (에이전트가 유형 선택)</option>
         <option value="general">종합 분석 (사진·일반 이미지)</option>
         <option value="document">문서 / 스크린샷 재구성</option>
         <option value="chart">차트 / 그래프 데이터 추출</option>
@@ -57,10 +69,21 @@
       <label for="instruction">추가 지시 (선택)</label>
       <textarea id="instruction" placeholder="예: 영어로 작성해줘 / 제품의 결함 위주로 봐줘 / 표는 CSV 형태로"></textarea>
 
+      <div class="row">
+        <label><input type="checkbox" id="review" checked> 검토 단계 (원본과 대조)</label>
+        <select id="maxrev" title="최대 수정 횟수">
+          <option value="1">최대 1회 수정</option>
+          <option value="2">최대 2회 수정</option>
+          <option value="3">최대 3회 수정</option>
+        </select>
+      </div>
+      <div class="flow">흐름: 유형 판별 → 분석 → 검토 → (필요 시 재작성)<br>단계마다 Claude를 호출하므로 검토를 켜면 시간이 더 걸립니다.</div>
+
       <button id="run" class="btn" disabled>분석 시작</button>
     </section>
 
     <section class="card">
+      <ul id="steps"></ul>
       <div class="out-head">
         <span id="status">결과가 여기에 표시됩니다.</span>
         <div class="actions">
@@ -75,8 +98,9 @@
 <script>
 const $ = id => document.getElementById(id);
 const drop = $("drop"), fileInput = $("file"), thumbs = $("thumbs");
-const runBtn = $("run"), output = $("output"), statusEl = $("status");
+const runBtn = $("run"), output = $("output"), statusEl = $("status"), steps = $("steps");
 const copyBtn = $("copy"), dlBtn = $("download");
+const NODE_LABEL = { classify: "판별", analyze: "분석", review: "검토" };
 let files = [], savedName = null;
 
 function render() {
@@ -91,44 +115,68 @@ function render() {
   });
   runBtn.disabled = files.length === 0;
 }
-function addFiles(list) {
-  for (const f of list) if (f.type.startsWith("image/")) files.push(f);
-  render();
-}
+function addFiles(list) { for (const f of list) if (f.type.startsWith("image/")) files.push(f); render(); }
 drop.onclick = () => fileInput.click();
 fileInput.onchange = e => { addFiles(e.target.files); fileInput.value = ""; };
 drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
 drop.ondragleave = () => drop.classList.remove("over");
 drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); addFiles(e.dataTransfer.files); };
 document.addEventListener("paste", e => addFiles([...e.clipboardData.files]));
+$("review").onchange = e => { $("maxrev").disabled = !e.target.checked; };
+
+function step(text, cls, node) {
+  const li = document.createElement("li");
+  if (cls) li.className = cls;
+  if (node) { const s = document.createElement("span"); s.className = "node"; s.textContent = NODE_LABEL[node] || node; li.append(s); }
+  li.append(text);
+  steps.append(li); steps.scrollTop = steps.scrollHeight;
+}
 
 runBtn.onclick = async () => {
   const fd = new FormData();
   files.forEach(f => fd.append("files", f));
   fd.append("mode", $("mode").value);
   fd.append("instruction", $("instruction").value);
+  fd.append("review", $("review").checked);
+  fd.append("max_revisions", $("maxrev").value);
 
-  output.textContent = ""; savedName = null;
+  let done = "", current = "", header = "";
+  const show = () => { output.textContent = done + header + current; output.scrollTop = output.scrollHeight; };
+  output.textContent = ""; steps.innerHTML = ""; savedName = null;
   runBtn.disabled = copyBtn.disabled = dlBtn.disabled = true;
-  statusEl.textContent = "분석 중…";
+  statusEl.textContent = "에이전트 실행 중…";
+
+  const handle = ev => {
+    switch (ev.type) {
+      case "image_start":
+        header = `${"=".repeat(60)}\n[${ev.index}/${ev.total}] ${ev.name}\n${"=".repeat(60)}\n\n`; current = "";
+        step(`[${ev.index}/${ev.total}] ${ev.name}`, "img"); break;
+      case "status": step(ev.message, "", ev.node); statusEl.textContent = ev.message; break;
+      case "draft_reset": current = ""; break;
+      case "token": current += ev.text; break;
+      case "image_done": done += header + current.trim() + "\n\n"; header = current = ""; break;
+      case "error": step("오류: " + ev.message, "err"); statusEl.textContent = "오류: " + ev.message; break;
+      case "saved": savedName = ev.filename; break;
+    }
+    show();
+  };
+
   try {
     const res = await fetch("/api/analyze", { method: "POST", body: fd });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || res.statusText);
-    }
+    if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || res.statusText); }
     const reader = res.body.getReader(), dec = new TextDecoder();
     let buf = "";
     while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
+      const { value, done: end } = await reader.read();
+      if (end) break;
       buf += dec.decode(value, { stream: true });
-      const m = buf.match(/\n<<SAVED:(.+?)>>$/);
-      if (m) { savedName = m[1]; output.textContent = buf.slice(0, m.index); }
-      else output.textContent = buf;
-      output.scrollTop = output.scrollHeight;
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+        if (line) handle(JSON.parse(line));
+      }
     }
-    statusEl.textContent = savedName ? `완료 · outputs/${savedName} 에 저장됨` : "완료";
+    if (savedName) statusEl.textContent = `완료 · outputs/${savedName} 에 저장됨`;
   } catch (e) {
     statusEl.textContent = "오류: " + e.message;
   } finally {
@@ -137,10 +185,7 @@ runBtn.onclick = async () => {
   }
 };
 
-copyBtn.onclick = async () => {
-  await navigator.clipboard.writeText(output.textContent);
-  statusEl.textContent = "클립보드에 복사됨";
-};
+copyBtn.onclick = async () => { await navigator.clipboard.writeText(output.textContent); statusEl.textContent = "클립보드에 복사됨"; };
 dlBtn.onclick = () => {
   if (savedName) { location.href = "/api/download/" + encodeURIComponent(savedName); return; }
   const a = document.createElement("a");
