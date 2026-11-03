@@ -2,3 +2,4 @@
 .env
 outputs/
 __pycache__/
+*.log
