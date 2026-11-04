@@ -21,7 +21,7 @@ def in_project_venv() -> bool:
 
 
 def deps_installed(py: Path) -> bool:
-    return subprocess.run([py, "-c", "import fastapi, uvicorn, multipart, langgraph"],
+    return subprocess.run([py, "-c", "import fastapi, uvicorn, multipart, langgraph, mcp"],
                           capture_output=True).returncode == 0
 
 

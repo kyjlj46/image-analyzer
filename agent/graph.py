@@ -132,7 +132,7 @@ def review(state: ImageState) -> dict:
 
 def verify(state: ImageState) -> dict:
     i, p = state["index"], Path(state["image_path"])
-    emit(i, type="status", node="verify", message="웹 검색으로 사실 확인 중…")
+    emit(i, type="status", node="verify", message=f"웹 검색으로 사실 확인 중… ({llm.web_label()})")
     text = stream_into(i, "verify", llm.stream_text(
         prompts.VERIFY_PROMPT.format(image_file=p.name, draft=state["draft"], max_items=5),
         prompts.VERIFIER_SYSTEM, p.parent, tools=llm.WEB_TOOLS,
@@ -143,7 +143,7 @@ def verify(state: ImageState) -> dict:
 
 def research(state: ImageState) -> dict:
     i, p = state["index"], Path(state["image_path"])
-    emit(i, type="status", node="research", message="웹서칭: 관련 정보 조사 중…")
+    emit(i, type="status", node="research", message=f"웹서칭: 관련 정보 조사 중… ({llm.web_label()})")
     instruction = state.get("instruction", "").strip()
     text = stream_into(i, "research", llm.stream_text(
         prompts.RESEARCH_PROMPT.format(image_file=p.name, draft=state["draft"], max_items=4,
@@ -288,7 +288,7 @@ class QAState(TypedDict, total=False):
 def answer(state: QAState) -> dict:
     paths = [Path(p) for p in state["image_paths"]]
     emit("qa", type="status", node="answer",
-         message="답변 작성 중…" + (" (웹 검색 허용)" if state.get("web_enabled") else ""))
+         message="답변 작성 중…" + (f" (웹 검색 허용 · {llm.web_label()})" if state.get("web_enabled") else ""))
     history = "\n\n".join(f"Q: {h['q']}\nA: {h['a']}" for h in state.get("history", [])) or "(없음)"
     text = stream_into("qa", "answer", llm.stream_text(
         prompts.QA_PROMPT.format(files=_file_names(paths, state.get("image_names")), context=state["context"],

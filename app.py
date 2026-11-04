@@ -3,6 +3,7 @@
 - POST /api/analyze : 이미지 여러 장 → batch_graph(병렬 분석 + 검토 + 웹 검증 + 웹서칭 + 종합 리포트)
 - POST /api/ask     : 분석이 끝난 뒤 이미지/리포트에 대한 추가 질문 → qa_graph
 - GET  /api/download/{session_id} : 결과 .txt (추가 질문 포함)
+- GET/POST /api/mcp, POST /api/mcp/test : 웹 도구 MCP 서버 연결 상태·설정·연결 테스트 (agent/mcp_link.py)
 
 응답은 NDJSON(한 줄에 JSON 이벤트 하나) 스트림. 이벤트의 index는 이미지 번호, "report", "qa" 중 하나.
 업로드한 이미지와 결과는 sessions/<id>/ 에 보관되어 추가 질문에 쓰이고, .txt는 outputs/ 에 저장된다.
@@ -19,7 +20,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from agent import batch_graph, qa_graph
+from agent import batch_graph, mcp_link, qa_graph
 from agent.llm import LLMError
 from agent.prompts import IMAGE_TYPES
 
@@ -229,6 +230,42 @@ def ask(req: AskRequest):
     elif not any(str(i["index"]) == req.target and i.get("draft") for i in s["images"]):
         raise HTTPException(400, "분석이 끝난 이미지에만 질문할 수 있습니다.")
     return StreamingResponse(run_qa(s, req), media_type="application/x-ndjson")
+
+
+# ── 웹 도구 (MCP 서버 연결) ─────────────────────────────────────────────
+
+class MCPSettings(BaseModel):
+    mode: str              # stdio / http / off
+    dir: str | None = None
+    url: str | None = None
+
+
+def _link_info() -> dict:
+    s = mcp_link.load_settings()
+    link = mcp_link.resolve(s)
+    return {"settings": s, "mode": link.mode, "label": link.label, "target": link.target, "warning": link.warning,
+            "tools": list(mcp_link.TOOL_NAMES) if link.mode != "off" else [], "modes": list(mcp_link.MODES)}
+
+
+@app.get("/api/mcp")
+def mcp_status():
+    """현재 설정과 실제 사용할 연결 (빠름, 서버에 접속하지 않음)."""
+    return _link_info()
+
+
+@app.post("/api/mcp")
+def mcp_save(body: MCPSettings):
+    try:
+        mcp_link.save_settings(body.mode, body.dir, body.url)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return mcp_link.check()
+
+
+@app.post("/api/mcp/test")
+def mcp_test():
+    """MCP 서버에 실제로 접속해 도구 목록을 받아 본다."""
+    return mcp_link.check()
 
 
 # ── 파일 ───────────────────────────────────────────────────────────────

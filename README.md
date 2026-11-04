@@ -46,18 +46,25 @@ qa_graph      START ─▶ answer ─▶ END   (Read, 웹 허용 시 Read+웹 �
 
 웹 검증·웹서칭·추가 질문의 웹 검색은 별도 프로젝트인 [mcp-tools-server](https://github.com/kyjlj46/mcp-tools-server-)의 MCP 도구를 씁니다.
 이 도구들은 LLM이 tool calling으로 직접 고르고 호출합니다.
+쓰는 도구는 `web_search`, `news_search`, `fetch_url`, `wikipedia`, `current_time`, `calculate`입니다.
 
-- 쓰는 도구: `web_search`, `news_search`, `fetch_url`, `wikipedia`, `current_time`, `calculate`
-- 연결: 두 프로젝트를 나란히 두고(`.../image-analyzer`, `.../mcp-tools-server`) 각각 `uv sync`를 하면 자동으로 연결됩니다.
-  - 다른 위치에 두었다면 환경변수 `MCP_TOOLS_DIR`에 그 폴더를 지정하세요.
-- mcp-tools-server가 없거나 `USE_MCP=0`이면 Claude Code 내장 WebSearch로 대신합니다.
+화면 왼쪽의 **웹 도구 (MCP 서버)** 칸이 연결점입니다. 연결 상태와 도구 목록을 보여 주고, **연결 테스트**와 **설정**(연결 방식 변경)을 할 수 있습니다.
+
+| 연결 방식 | MCP 서버 기동 | 설정 |
+|---|---|---|
+| 자동 실행 (stdio, 기본) | 따로 켤 필요가 없습니다. 웹 단계가 실행될 때 Claude가 하위 프로세스로 띄우고, 끝나면 함께 종료합니다. | mcp-tools-server 폴더 (기본: 옆 폴더 `../mcp-tools-server`) |
+| 실행 중인 서버에 연결 (HTTP) | mcp-tools-server의 `start_http.bat`을 실행하거나, 그 프로젝트에서 F5 → "MCP 서버 실행 (HTTP)"을 선택합니다. | 주소 (기본: `http://127.0.0.1:8765/mcp`) |
+| 사용 안 함 | 없음 | Claude Code 내장 WebSearch를 씁니다. |
+
+- 설정은 `mcp_settings.json`에 저장됩니다(git 제외). 저장하면 다음 분석부터 바로 적용되며, 서버를 다시 시작할 필요가 없습니다.
+- 처음 값은 환경변수로도 정할 수 있습니다: `MCP_TOOLS_DIR`(폴더), `MCP_URL`(HTTP 주소, 지정하면 HTTP 방식), `USE_MCP=0`(사용 안 함).
+- 연결할 수 없으면(폴더가 없거나 HTTP 서버가 꺼져 있으면) 분석이 멈추지 않도록 내장 WebSearch로 자동 대체합니다. 대체됐다는 사실은 화면과 단계 로그에 표시됩니다.
 - 분석할 때는 `--strict-mcp-config`를 쓰므로, 사용자가 Claude Code에 따로 등록한 MCP 서버는 불러오지 않습니다.
 
 ```
-analyze ─▶ verify / research / answer ──(claude -p --mcp-config)──▶ mcp-tools-server (stdio)
-                                                                    ├ web_search · news_search
-                                                                    ├ fetch_url · wikipedia
-                                                                    └ current_time · calculate
+verify / research / answer ──claude -p --mcp-config──▶ mcp-tools-server
+   (agent/llm.py "@web")       (agent/mcp_link.py)     ├ stdio: 매 호출마다 자동 실행
+                                                       └ http : start_http.bat 으로 켠 서버
 ```
 
 ## 파일 구성
@@ -65,7 +72,8 @@ analyze ─▶ verify / research / answer ──(claude -p --mcp-config)──�
 |---|---|
 | `agent/graph.py` | 상태, 노드, 라우팅, 3개 그래프 정의 |
 | `agent/prompts.py` | 노드별 프롬프트, 이미지 유형 목록 |
-| `agent/llm.py` | LLM 호출 계층 (`claude -p` CLI 래퍼, 노드별 도구 제한, MCP 서버 연결 `WEB_TOOLS`) |
+| `agent/llm.py` | LLM 호출 계층 (`claude -p` CLI 래퍼, 노드별 도구 제한, 웹 도구 자리표시 `@web`) |
+| `agent/mcp_link.py` | MCP 서버 연결점: 연결 방식 설정·자동 대체·연결 테스트 (`/api/mcp`) |
 | `app.py` | FastAPI 서버. `/api/analyze`, `/api/ask`, `/api/download`. 이벤트를 NDJSON으로 스트리밍 |
 | `static/index.html` | 웹 화면 (이미지별 탭 · 단계 로그 · 결과 · 질문 채팅) |
 | `run.py`, `start.bat` | 실행기 (.venv 자동 준비) |
@@ -77,7 +85,7 @@ analyze ─▶ verify / research / answer ──(claude -p --mcp-config)──�
   UI에 진행 상황을 보내려면 노드 안에서 `emit(index, type="status", node="...", message="...")`,
   텍스트를 흘려보내려면 `stream_into(index, part, llm.stream_text(...))`.
 - **이미지 유형 추가**: `agent/prompts.py`의 `IMAGE_TYPES`, `ANALYZE_PROMPTS`, `CLASSIFY_PROMPT`.
-- **도구 추가**: 새 도구는 mcp-tools-server에 `@server.tool()` 함수로 만들고, `agent/llm.py`의 `MCP_WEB_TOOLS`에 이름을 추가하면 됩니다.
+- **도구 추가**: 새 도구는 mcp-tools-server에 `@server.tool()` 함수로 만들고, `agent/mcp_link.py`의 `TOOL_NAMES`에 이름을 추가하면 됩니다.
   노드별로 허용할 도구는 `llm.stream_text(..., tools="Read,mcp__tools__fetch_url")` 형식으로 지정합니다.
 - **LLM 교체**: `agent/llm.py`의 `stream_text()` / `complete()`만 바꾸면 됨 (예: Anthropic API).
 

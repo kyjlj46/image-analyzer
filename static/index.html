@@ -75,6 +75,19 @@
   .msg.a.pending { color:var(--muted); }
   .ask { display:flex; gap:6px; align-items:flex-end; }
   .ask textarea { min-height:42px; height:42px; }
+  .mcp { margin-top:4px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--bg); font-size:13px; }
+  .mcp .row { display:flex; align-items:center; gap:8px; }
+  .mcp .row b { flex:1; font-weight:600; }
+  .mcp .tgt { color:var(--muted); font-size:11.5px; word-break:break-all; margin-top:3px; }
+  .mcp .warn { color:var(--err); font-size:12px; margin-top:4px; }
+  .mcp .tools { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+  .mcp .tools span { font-size:11px; padding:1px 6px; border-radius:4px; border:1px solid var(--line); color:var(--muted); font-family:ui-monospace,Consolas,monospace; }
+  .mcp .btn { padding:4px 10px; font-size:12px; }
+  #mcpform { margin-top:8px; display:grid; gap:6px; }
+  #mcpform[hidden] { display:none; }
+  #mcpform label { font-size:12.5px; display:flex; gap:6px; align-items:flex-start; }
+  #mcpform small { color:var(--muted); display:block; font-size:11.5px; }
+  #mcpform .acts { display:flex; gap:6px; justify-content:flex-end; }
   .askopt { font-size:12.5px; color:var(--muted); margin-top:6px; display:flex; gap:6px; align-items:center; }
 </style>
 </head>
@@ -106,7 +119,7 @@
         <select id="maxrev"><option value="1">최대 1회</option><option value="2">최대 2회</option><option value="3">최대 3회</option></select>
       </div>
       <div class="opt">
-        <label><input type="checkbox" id="verify"><span>웹 검색 검증<small>브랜드·장소·인물 등을 WebSearch로 사실 확인</small></span></label>
+        <label><input type="checkbox" id="verify"><span>웹 검색 검증<small>브랜드·장소·인물 등을 웹 도구로 사실 확인</small></span></label>
       </div>
       <div class="opt">
         <label><input type="checkbox" id="research"><span>웹서칭<small>이미지 속 대상의 배경·최신 정보·관련 링크를 조사해 [웹서칭]으로 추가</small></span></label>
@@ -118,6 +131,24 @@
         <span>동시 처리<small>여러 장을 한 번에 분석할 개수</small></span>
         <select id="concurrency"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
       </div>
+      <label class="t">웹 도구 (MCP 서버)</label>
+      <div class="mcp">
+        <div class="row"><span id="mcpdot" class="dot"></span><b id="mcplabel">확인 중…</b>
+          <button id="mcptest" class="btn ghost" type="button">연결 테스트</button>
+          <button id="mcpedit" class="btn ghost" type="button">설정</button></div>
+        <div id="mcptarget" class="tgt"></div>
+        <div id="mcpwarn" class="warn" hidden></div>
+        <div id="mcptools" class="tools"></div>
+        <div id="mcpform" hidden>
+          <label><input type="radio" name="mcpmode" value="stdio"><span>자동 실행 (stdio)<small>분석할 때마다 mcp-tools-server를 자동으로 실행합니다. 따로 켤 필요가 없습니다.</small></span></label>
+          <input type="text" id="mcpdir" placeholder="mcp-tools-server 폴더 경로">
+          <label><input type="radio" name="mcpmode" value="http"><span>실행 중인 서버에 연결 (HTTP)<small>mcp-tools-server를 HTTP 모드로 먼저 켜 두고 그 주소에 연결합니다.</small></span></label>
+          <input type="text" id="mcpurl" placeholder="http://127.0.0.1:8765/mcp">
+          <label><input type="radio" name="mcpmode" value="off"><span>MCP 사용 안 함<small>Claude Code 내장 WebSearch를 씁니다.</small></span></label>
+          <div class="acts"><button id="mcpcancel" class="btn ghost" type="button">취소</button><button id="mcpsave" class="btn" type="button">저장 · 연결 테스트</button></div>
+        </div>
+      </div>
+
       <div class="flow">흐름: 유형 판별 → 분석 → 검토 → 웹 검증·웹서칭(동시) → (여러 장이면) 종합 리포트<br>단계마다 Claude를 호출하므로 켜는 단계가 많을수록 시간이 더 걸립니다.</div>
 
       <button id="run" class="btn" disabled>분석 시작</button>
@@ -285,6 +316,43 @@ async function askQuestion(p) {
   } catch (e) { a.textContent = "오류: " + e.message; }
   finally { asking = false; Object.values(panels).forEach(x => setReady(x, x.ready)); p.input.focus(); }
 }
+
+// ── 웹 도구 (MCP 서버 연결) ──
+let mcpInfo = null;
+function renderMCP(info, tested) {
+  mcpInfo = info;
+  const used = info.mode !== "off", failed = tested && info.ok === false;
+  $("mcpdot").className = "dot " + (failed ? "err" : used ? (tested ? "ok" : "") : (info.settings.mode === "off" ? "" : "err"));
+  $("mcplabel").textContent = failed ? "연결 실패" : info.label + (tested && used ? " · 연결됨" : "");
+  $("mcptarget").textContent = info.target ? (info.mode === "http" ? "주소: " : info.mode === "stdio" ? "폴더: " : "설정 위치: ") + info.target : "";
+  const warn = info.error || info.warning;
+  $("mcpwarn").hidden = !warn; $("mcpwarn").textContent = warn || "";
+  $("mcptools").innerHTML = "";
+  for (const t of (info.tools || [])) $("mcptools").append(el("span", null, t));
+}
+async function mcpCall(url, opts) {
+  $("mcpdot").className = "dot run"; $("mcplabel").textContent = "연결 확인 중…";
+  try {
+    const res = await fetch(url, opts); const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    renderMCP(data, url !== "/api/mcp" || (opts && opts.method === "POST"));
+  } catch (e) { $("mcpdot").className = "dot err"; $("mcplabel").textContent = "오류"; $("mcpwarn").hidden = false; $("mcpwarn").textContent = e.message; }
+}
+$("mcptest").onclick = () => mcpCall("/api/mcp/test", { method: "POST" });
+$("mcpedit").onclick = () => {
+  const s = mcpInfo ? mcpInfo.settings : { mode: "stdio", dir: "", url: "" };
+  document.querySelectorAll("input[name=mcpmode]").forEach(r => r.checked = r.value === s.mode);
+  $("mcpdir").value = s.dir || ""; $("mcpurl").value = s.url || "";
+  $("mcpform").hidden = !$("mcpform").hidden;
+};
+$("mcpcancel").onclick = () => { $("mcpform").hidden = true; };
+$("mcpsave").onclick = async () => {
+  const mode = (document.querySelector("input[name=mcpmode]:checked") || {}).value || "stdio";
+  $("mcpform").hidden = true;
+  await mcpCall("/api/mcp", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode, dir: $("mcpdir").value, url: $("mcpurl").value }) });
+};
+mcpCall("/api/mcp/test", { method: "POST" });
 
 // ── 복사 / 다운로드 ──
 $("copy").onclick = async () => {
